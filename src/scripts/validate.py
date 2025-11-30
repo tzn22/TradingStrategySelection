@@ -19,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from stable_baselines3 import PPO, SAC, A2C, DDPG, TD3
+from sb3_contrib import RecurrentPPO
 from preprocessing.df_to_numpy import df_to_numpy
 from environment.numpy_stock_env import NumpyStockTradingEnv
 
@@ -27,10 +28,13 @@ def load_model(model_path: str, device: str = 'cpu'):
     """Load trained model from file"""
     print(f"Loading model from: {model_path}")
 
-    # Check the type of model baed on name
+    # Check the type of model based on name
     model_name = Path(model_path).stem.lower()
 
-    if 'ppo' in model_name:
+    if 'lstm' in model_name or 'rppo' in model_name or 'recurrent' in model_name:
+        model = RecurrentPPO.load(model_path, device=device)
+        print(f"  Model type: RecurrentPPO (LSTM)")
+    elif 'ppo' in model_name:
         model = PPO.load(model_path, device=device)
         print(f"  Model type: PPO")
     elif 'sac' in model_name:
@@ -78,8 +82,27 @@ def run_validation(model, environment, deterministic: bool = True):
     account_values = [environment.initial_amount]
     actions_list = []
 
+    # Check if model is recurrent (LSTM)
+    is_recurrent = isinstance(model, RecurrentPPO)
+
+    # Initialize LSTM states if needed
+    lstm_states = None
+    episode_starts = np.ones((1,), dtype=bool)
+
     for step in range(max_steps):
-        action, _states = model.predict(test_obs, deterministic=deterministic)
+        if is_recurrent:
+            # For RecurrentPPO, pass lstm_states and episode_starts
+            action, lstm_states = model.predict(
+                test_obs,
+                state=lstm_states,
+                episode_start=episode_starts,
+                deterministic=deterministic
+            )
+            episode_starts = np.zeros((1,), dtype=bool)  # Not starting new episode
+        else:
+            # For non-recurrent models
+            action, _states = model.predict(test_obs, deterministic=deterministic)
+
         test_obs, rewards, dones, info = test_env.step(action)
 
         # Collect data
